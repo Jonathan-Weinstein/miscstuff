@@ -316,11 +316,10 @@ uint32_t StringGraph_CountConnectedComponents(const StringGraph *g)
 #endif
     free(visited);
     free(toVisit);
-    ASSERT(StringGraph_CountConnectedComponentsDestructive(g->explicitConnection, g->nNodes) == result);
     return result;
 }
 
-void SimpleTest()
+static void SimpleTest()
 {
     static const struct {
         uint8_t a, b;
@@ -359,7 +358,10 @@ void SimpleTest()
 }
 
 
-static void Simulate(uint32_t const numStrings, uint32_t const numIters, double const MillisecondsPerTickF64)
+static void Simulate(uint32_t const numStrings,
+                     uint32_t const numIters,
+                     double const MillisecondsPerTickF64,
+                     bool const bTest)
 {
     ASSERT(numStrings && numStrings <= (1u << MAX_STRINGS_LG2));
     ASSERT(numIters && numIters <= (1u << 15));
@@ -401,10 +403,13 @@ static void Simulate(uint32_t const numStrings, uint32_t const numIters, double 
             StringGraph_Weld(&g, bag[i], bag[i + 1]);
         }
         unsigned answer;
-        //TIME_IF(countConnCompsMsAccum, answer = StringGraph_CountConnectedComponents(&g), currentIter >= NumIterTimingDiscard);
+        unsigned const otherMethodAnswer = bTest ? StringGraph_CountConnectedComponents(&g) : 0;
         TIME_IF(countConnCompsMsAccum,
                 answer = StringGraph_CountConnectedComponentsDestructive(g.explicitConnection, g.nNodes),
                 currentIter >= NumIterTimingDiscard);
+        if (bTest) {
+            ASSERT(otherMethodAnswer == answer);
+        }
         if (answer < HistoCap) {
             histo[answer] += 1;
             highestTrackedAnswer = highestTrackedAnswer >= answer ? highestTrackedAnswer : answer;
@@ -510,14 +515,14 @@ int main(int argc, char **argv)
     const double MillisecondsPerTickF64 = 1000.0 / (double) TimerTicksPerSecond();
 
     if (!bDebugTest) {
-        Simulate(numStrings, numIters, MillisecondsPerTickF64);
+        Simulate(numStrings, numIters, MillisecondsPerTickF64, false);
     }
     else {
         puts("doing debug test");
         for (int32_t x = -17; x <= 17; ++x) {
             int32_t newIterCount = numIters + x;
             if (newIterCount >= 1) {
-                Simulate(numStrings, newIterCount, MillisecondsPerTickF64);
+                Simulate(numStrings, newIterCount, MillisecondsPerTickF64, true);
             }
         }
     }
