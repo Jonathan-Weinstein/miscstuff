@@ -8,8 +8,14 @@ pick 2 random nodes and weld them. A node cannot be welded to itself.
 After this is done, how many loops are formed?
 See SimpleTest() for an example.
 
-A possible way to compile this:
-    g++ -x c -std=c99 -Wall -Wextra -Wshadow -DNDEBUG -O2 -s loop_simulation.cpp -o prog.exe
+Some possible ways to compile this:
+
+Debug:
+    gcc -Wall -Wextra -Wshadow -std=c99 -D_DEBUG -g string_weld_loop_count_simulation.c -o prog_debug.exe
+Release:
+    gcc -Wall -Wextra -Wshadow -std=c99 -DNDEBUG -O2 -s string_weld_loop_count_simulation.c -o prog_rel.exe
+
+This should compile as c++ too.
 */
 
 #ifndef _CRT_SECURE_NO_WARNINGS
@@ -177,6 +183,9 @@ struct StringGraph {
 typedef struct StringGraph StringGraph;
 #define ImplicitConnection(x) ((x) ^ 1) // starting string connections
 
+#ifdef _DEBUG
+#define WELD_CHECK
+#endif
 void StringGraph_Contruct(StringGraph *sg, uint32_t nNodes)
 {
     ASSERT(!(nNodes & 1)); // must be even
@@ -184,9 +193,11 @@ void StringGraph_Contruct(StringGraph *sg, uint32_t nNodes)
     NodeId *p = XMALLOC_TYPED(NodeId, nNodes);
     sg->nNodes = nNodes;
     sg->explicitConnection = p;
+#ifdef WELD_CHECK
     for (uint32_t i = 0; i < nNodes; ++i) {
         p[i] = -1;
     }
+#endif
 }
 
 void StringGraph_Destroy(StringGraph *sg)
@@ -198,8 +209,10 @@ void StringGraph_Weld(StringGraph *sg, NodeId a, NodeId b)
 {
     ASSERT(a < sg->nNodes && b < sg->nNodes);
     ASSERT(a != b); // cant weld node to itself
+#ifdef WELD_CHECK
     ASSERT(sg->explicitConnection[a] == (NodeId)-1); // should not already be welded
     ASSERT(sg->explicitConnection[b] == (NodeId)-1); // should not already be welded
+#endif
 
     sg->explicitConnection[a] = b;
     sg->explicitConnection[b] = a;
@@ -376,7 +389,9 @@ static void Simulate(uint32_t const numStrings, uint32_t const numIters, double 
 
     for (uint32_t currentIter = 0; currentIter < numIters; ++currentIter) {
         int64_t const totalTicksBegin = TimerGetTicks();
+    #ifdef WELD_CHECK
         memset(g.explicitConnection, 0xff, numNodes * sizeof(NodeId));
+    #endif
         for (uint32_t i = 0; i < numNodes; ++i) {
             bag[i] = i;
         }
