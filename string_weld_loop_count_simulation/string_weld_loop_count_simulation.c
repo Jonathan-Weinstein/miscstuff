@@ -207,63 +207,10 @@ void StringGraph_Weld(StringGraph *sg, NodeId a, NodeId b)
 
 uint32_t StringGraph_CountConnectedComponentsDestructive(uint32_t *excon, uint32_t nNodes)
 {
-#if 0 // this way seems to match
-    #define VISITED(x) ((int32_t)(excon[x]) < 0)
-    uint32_t const toVisitCapacity = nNodes * 2 + 2; // hmm
-    NodeId *const toVisit = XMALLOC_TYPED(NodeId, toVisitCapacity);
-    uint32_t result = 0;
-    uint32_t nNodesAllComponents = 0;
-    for (uint32_t outerIter = 0; outerIter < nNodes; outerIter += 2) { // NOTE: can step by 2
-        if (!VISITED(outerIter)) {
-            /* flood-fill */
-            uint32_t currentNodeId = outerIter;
-            uint32_t nToVisit = 0;
-            uint32_t nNodesThisComponent = 0;
-            for (;;) {
-                if (!VISITED(currentNodeId)) {
-                    uint32_t const a = ImplicitConnection(currentNodeId);
-                    uint32_t const b = excon[currentNodeId];
-                    /* NOTE: a == b is possible here. */
-                    assert(b != currentNodeId);
-                    assert(a < nNodes && b < nNodes);
-                    excon[currentNodeId] = (NodeId)-1; // mark currentNodeId visited
-                    nNodesThisComponent++;
-                    if (!VISITED(a)) {
-                        toVisit[nToVisit++] = a;
-                    }
-                    if (!VISITED(b) && a != b) {
-                        toVisit[nToVisit++] = b;
-                    }
-                }
-
-                if (nToVisit) {
-                    currentNodeId = toVisit[--nToVisit];
-                }
-                else {
-                    break;
-                }
-            }
-            result++;
-            nNodesAllComponents += nNodesThisComponent; // half as many strings
-        }
-    }
-
-#ifdef _DEBUG
-    for (uint32_t i = 0; i < nNodes; ++i) {
-        ASSERT(VISITED(i));
-    }
-#endif
-    ASSERT(nNodes == nNodesAllComponents);
-    free(toVisit);
-    return result;
-    #undef VISITED
-
-#else
     uint32_t result = 0;
     uint32_t nStringsAllComponents = 0;
     for (uint32_t outerIter = 0; outerIter < nNodes; outerIter += 2) { // NOTE: step by 2
         if ((int32_t)excon[outerIter] >= 0) {
-            /* flood-fill */
             int32_t currentNodeId = outerIter;
             uint32_t nStringsThisComponent = 0;
             uint32_t weldConn;
@@ -286,7 +233,6 @@ uint32_t StringGraph_CountConnectedComponentsDestructive(uint32_t *excon, uint32
         ASSERT((int32_t)excon[i + 1] >= 0);
     }
     return result;
-#endif
 }
 
 
