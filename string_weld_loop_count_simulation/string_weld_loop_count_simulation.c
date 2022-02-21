@@ -8,6 +8,10 @@ pick 2 random nodes and weld them. A node cannot be welded to itself.
 After this is done, how many loops are formed?
 See SimpleTest() for an example.
 
+Skip to string @end_util for interesting parts.
+
+---
+
 Some possible ways to compile this:
 
 Debug:
@@ -72,6 +76,13 @@ void *xmalloc(size_t nbytes)
     return p;
 }
 #define XMALLOC_TYPED(T, n) ((T *)xmalloc((n) * sizeof(T)))
+
+static NO_RETURN void FailedVerify(const char *expr, int line)
+{
+    printf("VERIFY(%s) failed on line %d\n", expr, line);
+    exit(EXIT_FAILURE);
+}
+#define VERIFY(x) ((x) ? (void)0 : FailedVerify(#x, __LINE__))
 // ----------------------------------------------------------------------------
 
 
@@ -152,6 +163,9 @@ uint32_t pcg32_boundedrand_r(pcg32_random_t* rng, uint32_t bound)
 // ============================================================================
 
 
+// @end_util:
+
+
 // Fisher–Yates/Knuth shuffle:
 void Shuffle(uint32_t *bag, int32_t n, pcg32_random_t *rng)
 {
@@ -186,7 +200,7 @@ typedef struct StringGraph StringGraph;
 #ifdef _DEBUG
 #define WELD_CHECK
 #endif
-void StringGraph_Contruct(StringGraph *sg, uint32_t nNodes)
+void Contruct(StringGraph *sg, uint32_t nNodes)
 {
     ASSERT(!(nNodes & 1)); // must be even
     ASSERT(nNodes >= 2 && nNodes <= (1 << MAX_NODES_LG2));
@@ -200,25 +214,25 @@ void StringGraph_Contruct(StringGraph *sg, uint32_t nNodes)
 #endif
 }
 
-void StringGraph_Destroy(StringGraph *sg)
+void Destroy(StringGraph *sg)
 {
     free(sg->explicitConnection);
 }
 
-void StringGraph_Weld(StringGraph *sg, NodeId a, NodeId b)
+void Weld(StringGraph *sg, NodeId a, NodeId b)
 {
     ASSERT(a < sg->nNodes && b < sg->nNodes);
     ASSERT(a != b); // cant weld node to itself
 #ifdef WELD_CHECK
-    ASSERT(sg->explicitConnection[a] == (NodeId)-1); // should not already be welded
-    ASSERT(sg->explicitConnection[b] == (NodeId)-1); // should not already be welded
+    VERIFY(sg->explicitConnection[a] == (NodeId)-1); // should not already be welded
+    VERIFY(sg->explicitConnection[b] == (NodeId)-1); // should not already be welded
 #endif
 
     sg->explicitConnection[a] = b;
     sg->explicitConnection[b] = a;
 }
 
-uint32_t StringGraph_CountConnectedComponentsDestructive(uint32_t *excon, uint32_t nNodes)
+uint32_t CountConnectedComponentsDestructive(uint32_t *excon, uint32_t nNodes)
 {
     uint32_t result = 0;
     uint32_t nStringsAllComponents = 0;
@@ -249,16 +263,14 @@ uint32_t StringGraph_CountConnectedComponentsDestructive(uint32_t *excon, uint32
 }
 
 
-uint32_t StringGraph_CountConnectedComponents(const StringGraph *g)
+uint32_t CountConnectedComponentsOrig(const StringGraph *g)
 {
     uint32_t const nNodes = g->nNodes;
     NodeId const *const excon = g->explicitConnection;
     uint32_t const toVisitCapacity = nNodes * 2 + 2; // hmm
     NodeId *const toVisit = XMALLOC_TYPED(NodeId, toVisitCapacity);
     uint8_t *const visited = (uint8_t *)calloc(nNodes, sizeof(uint8_t)); // destructive idea
-    if (visited == NULL) {
-        exit(EXIT_FAILURE);
-    }
+    VERIFY(visited != NULL);
     uint32_t result = 0;
     uint32_t nNodesAllComponents = 0;
     for (uint32_t outerIter = 0; outerIter < nNodes; outerIter += 2) { // NOTE: can step by 2
@@ -277,21 +289,9 @@ uint32_t StringGraph_CountConnectedComponents(const StringGraph *g)
                     visited[currentNodeId] = true;
                     nNodesThisComponent++;
                     if (!visited[a]) {
-                    #if 0
-                        if (nToVisit == toVisitCapacity) {
-                            puts("oops a");
-                            exit(EXIT_FAILURE);
-                        }
-                    #endif
                         toVisit[nToVisit++] = a;
                     }
                     if (!visited[b] && a != b) {
-                    #if 0
-                        if (nToVisit == toVisitCapacity) {
-                            puts("oops b");
-                            exit(EXIT_FAILURE);
-                        }
-                    #endif
                         toVisit[nToVisit++] = b;
                     }
                 }
@@ -344,17 +344,19 @@ static void SimpleTest()
     enum { NumWelds = sizeof(welds) / sizeof(welds[0]) };
 
     StringGraph g;
-    StringGraph_Contruct(&g, 22);
+    Contruct(&g, 22);
     for (int i = 0; i < NumWelds; ++i) {
-        StringGraph_Weld(&g, welds[i].a, welds[i].b);
+        Weld(&g, welds[i].a, welds[i].b);
     }
-    int result = StringGraph_CountConnectedComponents(&g);
+    int const otherMethodAnswer = CountConnectedComponentsOrig(&g);
+    int const result = CountConnectedComponentsDestructive(g.explicitConnection, g.nNodes);
+    VERIFY(otherMethodAnswer == result);
     printf("%s: result=%d\n", __FUNCTION__, result);
     if (result != 5) {
         puts(" *** TEST FAILED ***");
         exit(EXIT_FAILURE);
     }
-    StringGraph_Destroy(&g);
+    Destroy(&g);
 }
 
 
@@ -375,7 +377,7 @@ static void Simulate(uint32_t const numStrings,
     double totalMsAccum = 0.0;
 
     StringGraph g;
-    StringGraph_Contruct(&g, numNodes);
+    Contruct(&g, numNodes);
     uint32_t *const bag = XMALLOC_TYPED(uint32_t, numNodes);
     pcg32_random_t rng = PCG32_INITIALIZER;
 
@@ -400,15 +402,15 @@ static void Simulate(uint32_t const numStrings,
         TIME_IF(randgenMsAccum, Shuffle(bag, numNodes, &rng), currentIter >= NumIterTimingDiscard);
         /* do numNodes/2 welds, each closes 2 nodes: */
         for (uint32_t i = 0; i < numNodes; i += 2) { // NOTE: step = 2
-            StringGraph_Weld(&g, bag[i], bag[i + 1]);
+            Weld(&g, bag[i], bag[i + 1]);
         }
         unsigned answer;
-        unsigned const otherMethodAnswer = bTest ? StringGraph_CountConnectedComponents(&g) : 0;
+        unsigned const otherMethodAnswer = bTest ? CountConnectedComponentsOrig(&g) : 0;
         TIME_IF(countConnCompsMsAccum,
-                answer = StringGraph_CountConnectedComponentsDestructive(g.explicitConnection, g.nNodes),
+                answer = CountConnectedComponentsDestructive(g.explicitConnection, g.nNodes),
                 currentIter >= NumIterTimingDiscard);
         if (bTest) {
-            ASSERT(otherMethodAnswer == answer);
+            VERIFY(otherMethodAnswer == answer);
         }
         if (answer < HistoCap) {
             histo[answer] += 1;
@@ -434,7 +436,7 @@ static void Simulate(uint32_t const numStrings,
     }
 
     printf("Results for strings=%d iters=%d seed=???:\n", numStrings, numIters);
-    ASSERT(histo[0] == 0);
+    VERIFY(histo[0] == 0);
     uint32_t sumOfCounts = 0;
     int64_t sumOfAllAnswers = 0;
     for (unsigned answer = 1; answer <= highestTrackedAnswer; ++answer) {
@@ -452,14 +454,11 @@ static void Simulate(uint32_t const numStrings,
             puts("");
         }
     }
-    if (sumOfCounts != numIters) {
-        puts("\noops!\n");
-        exit(EXIT_FAILURE);
-    }
+    VERIFY(sumOfCounts == numIters);
     printf("Average answer = %f\n", (double)sumOfAllAnswers / (double)numIters);
 
     free(bag);
-    StringGraph_Destroy(&g);
+    Destroy(&g);
 }
 
 int main(int argc, char **argv)
