@@ -192,10 +192,11 @@ void Shuffle(uint32_t *bag, int32_t n, pcg32_random_t *rng)
 typedef uint32_t NodeId;
 struct StringGraph {
     uint32_t nNodes; // nStrings * 2
-    NodeId *explicitConnection; // made by welds
+    NodeId *welds; // welds[x] == y means x is welded to y, and
+                   // if that is the case then welds[y] == x must be true 
 };
 typedef struct StringGraph StringGraph;
-#define ImplicitConnection(x) ((x) ^ 1) // starting string connections
+#define StringConnection(x) ((x) ^ 1) // starting string connections, implicit
 
 #ifdef _DEBUG
 #define WELD_CHECK
@@ -206,7 +207,7 @@ void Contruct(StringGraph *sg, uint32_t nNodes)
     ASSERT(nNodes >= 2 && nNodes <= (1 << MAX_NODES_LG2));
     NodeId *p = XMALLOC_TYPED(NodeId, nNodes);
     sg->nNodes = nNodes;
-    sg->explicitConnection = p;
+    sg->welds = p;
 #ifdef WELD_CHECK
     for (uint32_t i = 0; i < nNodes; ++i) {
         p[i] = -1;
@@ -216,7 +217,7 @@ void Contruct(StringGraph *sg, uint32_t nNodes)
 
 void Destroy(StringGraph *sg)
 {
-    free(sg->explicitConnection);
+    free(sg->welds);
 }
 
 void Weld(StringGraph *sg, NodeId a, NodeId b)
@@ -224,40 +225,40 @@ void Weld(StringGraph *sg, NodeId a, NodeId b)
     ASSERT(a < sg->nNodes && b < sg->nNodes);
     ASSERT(a != b); // cant weld node to itself
 #ifdef WELD_CHECK
-    VERIFY(sg->explicitConnection[a] == (NodeId)-1); // should not already be welded
-    VERIFY(sg->explicitConnection[b] == (NodeId)-1); // should not already be welded
+    VERIFY(sg->welds[a] == (NodeId)-1); // should not already be welded
+    VERIFY(sg->welds[b] == (NodeId)-1); // should not already be welded
 #endif
 
-    sg->explicitConnection[a] = b;
-    sg->explicitConnection[b] = a;
+    sg->welds[a] = b;
+    sg->welds[b] = a;
 }
 
-uint32_t CountConnectedComponentsDestructive(uint32_t *excon, uint32_t nNodes)
+uint32_t CountConnectedComponentsDestructive(uint32_t *welds, uint32_t nNodes)
 {
     uint32_t result = 0;
     uint32_t nStringsAllComponents = 0;
     for (uint32_t outerIter = 0; outerIter < nNodes; outerIter += 2) { // NOTE: step by 2
-        if ((int32_t)excon[outerIter] >= 0) {
+        if ((int32_t)welds[outerIter] >= 0) {
             int32_t currentNodeId = outerIter;
             uint32_t nStringsThisComponent = 0;
             uint32_t weldConn;
             do {
-                weldConn = excon[currentNodeId];
+                weldConn = welds[currentNodeId];
                 ASSERT((int32_t)weldConn >= 0);
-                excon[currentNodeId & -2] = (NodeId)-1; // mark even node of currentNodeId's string
+                welds[currentNodeId & -2] = (NodeId)-1; // mark even node of currentNodeId's string
                 nStringsThisComponent++;
                 /* Traverse 1 weld then 1 string in the same direction (e.g counter-clockwise): */
-                currentNodeId = ImplicitConnection(weldConn);
+                currentNodeId = StringConnection(weldConn);
             } while ((weldConn & -2) != outerIter); // (x & -2) clears lowest bit in x
-            ASSERT((int32_t)excon[currentNodeId & -2] < 0);
+            ASSERT((int32_t)welds[currentNodeId & -2] < 0);
             result++;
             nStringsAllComponents += nStringsThisComponent;
         }
     }
     ASSERT(nStringsAllComponents * 2 == nNodes);
     for (uint32_t i = 0; i < nNodes; i += 2) { // NOTE: step of 2
-        ASSERT((int32_t)excon[i] < 0);
-        ASSERT((int32_t)excon[i + 1] >= 0);
+        ASSERT((int32_t)welds[i] < 0);
+        ASSERT((int32_t)welds[i + 1] >= 0);
     }
     return result;
 }
@@ -266,7 +267,7 @@ uint32_t CountConnectedComponentsDestructive(uint32_t *excon, uint32_t nNodes)
 uint32_t CountConnectedComponentsOrig(const StringGraph *g)
 {
     uint32_t const nNodes = g->nNodes;
-    NodeId const *const excon = g->explicitConnection;
+    NodeId const *const welds = g->welds;
     uint32_t const toVisitCapacity = nNodes * 2 + 2; // hmm
     NodeId *const toVisit = XMALLOC_TYPED(NodeId, toVisitCapacity);
     uint8_t *const visited = (uint8_t *)calloc(nNodes, sizeof(uint8_t)); // destructive idea
@@ -281,8 +282,8 @@ uint32_t CountConnectedComponentsOrig(const StringGraph *g)
             uint32_t nNodesThisComponent = 0;
             for (;;) {
                 if (!visited[currentNodeId]) {
-                    uint32_t const a = ImplicitConnection(currentNodeId);
-                    uint32_t const b = excon[currentNodeId];
+                    uint32_t const a = StringConnection(currentNodeId);
+                    uint32_t const b = welds[currentNodeId];
                     /* NOTE: a == b is possible here. */
                     assert(b != currentNodeId);
                     assert(a < nNodes && b < nNodes);
@@ -349,7 +350,7 @@ static void SimpleTest()
         Weld(&g, welds[i].a, welds[i].b);
     }
     int const otherMethodAnswer = CountConnectedComponentsOrig(&g);
-    int const result = CountConnectedComponentsDestructive(g.explicitConnection, g.nNodes);
+    int const result = CountConnectedComponentsDestructive(g.welds, g.nNodes);
     VERIFY(otherMethodAnswer == result);
     printf("%s: result=%d\n", __FUNCTION__, result);
     if (result != 5) {
@@ -394,7 +395,7 @@ static void Simulate(uint32_t const numStrings,
     for (uint32_t currentIter = 0; currentIter < numIters; ++currentIter) {
         int64_t const totalTicksBegin = TimerGetTicks();
     #ifdef WELD_CHECK
-        memset(g.explicitConnection, 0xff, numNodes * sizeof(NodeId));
+        memset(g.welds, 0xff, numNodes * sizeof(NodeId));
     #endif
         for (uint32_t i = 0; i < numNodes; ++i) {
             bag[i] = i;
@@ -407,7 +408,7 @@ static void Simulate(uint32_t const numStrings,
         unsigned answer;
         unsigned const otherMethodAnswer = bTest ? CountConnectedComponentsOrig(&g) : 0;
         TIME_IF(countConnCompsMsAccum,
-                answer = CountConnectedComponentsDestructive(g.explicitConnection, g.nNodes),
+                answer = CountConnectedComponentsDestructive(g.welds, g.nNodes),
                 currentIter >= NumIterTimingDiscard);
         if (bTest) {
             VERIFY(otherMethodAnswer == answer);
