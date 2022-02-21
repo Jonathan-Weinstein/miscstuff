@@ -133,7 +133,7 @@ uint32_t pcg32_boundedrand_r(pcg32_random_t* rng, uint32_t bound)
     // should usually terminate quickly; on average (assuming all bounds are
     // equally likely), 82.25% of the time, we can expect it to require just
     // one iteration.  In the worst case, someone passes a bound of 2^31 + 1
-    // (i.e., 2147483649), which invalidates almost 50% of the range.  In 
+    // (i.e., 2147483649), which invalidates almost 50% of the range.  In
     // practice, bounds are typically small and only a tiny amount of the range
     // is eliminated.
     for (;;) {
@@ -142,7 +142,7 @@ uint32_t pcg32_boundedrand_r(pcg32_random_t* rng, uint32_t bound)
             return r % bound;
     }
 }
-// end PCG 
+// end PCG
 // ============================================================================
 
 
@@ -266,33 +266,24 @@ uint32_t StringGraph_CountConnectedComponentsDestructive(uint32_t *excon, uint32
             /* flood-fill */
             int32_t currentNodeId = outerIter;
             uint32_t nStringsThisComponent = 0;
-            //int32_t saveLastWeldConn = -1; // debug check only
-            for (;;) {
-                uint32_t const weldConn = excon[currentNodeId];
-                //if ((int32_t)weldConn < 0) {
-                //    break; // already accounted for string of currentNodeId
-                //}
-                //saveLastWeldConn = weldConn;
+            uint32_t weldConn;
+            do {
+                weldConn = excon[currentNodeId];
                 ASSERT((int32_t)weldConn >= 0);
-                excon[currentNodeId] = (NodeId)-1; // mark currentNodeId accounted for
-                excon[ImplicitConnection(currentNodeId)] = (NodeId)-1; // also mark this accounted for
+                excon[currentNodeId & -2] = (NodeId)-1; // mark even node of currentNodeId's string
                 nStringsThisComponent++;
                 /* Traverse 1 weld then 1 string in the same direction (e.g counter-clockwise): */
                 currentNodeId = ImplicitConnection(weldConn);
-                if ((weldConn & -2) == outerIter) { // (x & -2) clears lowest bit in x
-                    break;
-                }
-            }
-            ASSERT((int32_t)excon[currentNodeId] < 0);
-            //ASSERT(saveLastWeldConn >= 0);
-            //ASSERT((saveLastWeldConn & ~(uint32_t)1) == outerIter); // came back to start string
+            } while ((weldConn & -2) != outerIter); // (x & -2) clears lowest bit in x
+            ASSERT((int32_t)excon[currentNodeId & -2] < 0);
             result++;
             nStringsAllComponents += nStringsThisComponent;
         }
     }
     ASSERT(nStringsAllComponents * 2 == nNodes);
-    for (uint32_t i = 0; i < nNodes; ++i) {
+    for (uint32_t i = 0; i < nNodes; i += 2) { // NOTE: step of 2
         ASSERT((int32_t)excon[i] < 0);
+        ASSERT((int32_t)excon[i + 1] >= 0);
     }
     return result;
 #endif
@@ -411,11 +402,11 @@ void SimpleTest()
 
 static void Simulate(uint32_t const numStrings, uint32_t const numIters, double const MillisecondsPerTickF64)
 {
-	ASSERT(numStrings && numStrings <= (1u << MAX_STRINGS_LG2));
-	ASSERT(numIters && numIters <= (1u << 15));
-	
-	enum { NumIterTimingDiscard = 3 };
-	
+    ASSERT(numStrings && numStrings <= (1u << MAX_STRINGS_LG2));
+    ASSERT(numIters && numIters <= (1u << 15));
+
+    enum { NumIterTimingDiscard = 3 };
+
     uint32_t const numNodes = numStrings * 2;
 
     double randgenMsAccum = 0.0;
@@ -497,7 +488,7 @@ static void Simulate(uint32_t const numStrings, uint32_t const numIters, double 
     }
     if (sumOfCounts != numIters) {
         puts("\noops!\n");
-		exit(EXIT_FAILURE);
+        exit(EXIT_FAILURE);
     }
     printf("Average answer = %f\n", (double)sumOfAllAnswers / (double)numIters);
 
@@ -512,7 +503,7 @@ int main(int argc, char **argv)
     // uint64_t seed = ...;
     uint32_t numIters = 30;
     uint32_t numStrings = 1u << 15;
-	bool bDebugTest = false;
+    bool bDebugTest = false;
 
     for (int i = 1; i < argc; ++i) {
         const char *arg = argv[i];
@@ -531,9 +522,9 @@ int main(int argc, char **argv)
             }
             numStrings = val;
         }
-		else if (strcmp(arg, "test") == 0) {
-			bDebugTest = true;
-		}
+        else if (strcmp(arg, "test") == 0) {
+            bDebugTest = true;
+        }
         else {
             printf("unknown argv[%d]=%s\n", i, arg);
             return EXIT_FAILURE;
@@ -556,28 +547,28 @@ int main(int argc, char **argv)
 #endif
 
     const double MillisecondsPerTickF64 = 1000.0 / (double) TimerTicksPerSecond();
-	
-	if (!bDebugTest) {
-		Simulate(numStrings, numIters, MillisecondsPerTickF64);
-	}
-	else {
-		puts("doing debug test");		
-		for (int32_t x = -17; x <= 17; ++x) {
-			int32_t newIterCount = numIters + x;
-			if (newIterCount >= 1) {
-				Simulate(numStrings, newIterCount, MillisecondsPerTickF64);
-			}
-		}
-	}
 
-	if (sizeof(void *) != 8) {
-		puts("not 64 bit");
-	}
+    if (!bDebugTest) {
+        Simulate(numStrings, numIters, MillisecondsPerTickF64);
+    }
+    else {
+        puts("doing debug test");
+        for (int32_t x = -17; x <= 17; ++x) {
+            int32_t newIterCount = numIters + x;
+            if (newIterCount >= 1) {
+                Simulate(numStrings, newIterCount, MillisecondsPerTickF64);
+            }
+        }
+    }
+
+    if (sizeof(void *) != 8) {
+        puts("not 64 bit");
+    }
 #ifdef _DEBUG
-	puts("_DEBUG defined");
+    puts("_DEBUG defined");
 #endif
 #ifdef NDEBUG
-	puts("NDEBUG defined");
+    puts("NDEBUG defined");
 #endif
     return 0;
 }
