@@ -16,6 +16,7 @@ Some possible ways to compile this:
 
 Debug:
     gcc -Wall -Wextra -Wshadow -std=c99 -D_DEBUG -g string_weld_loop_count_simulation.c -o prog_debug.exe
+    g++ -x c++ -std=c++14 -Wall -Wextra -Wshadow -D_DEBUG -g string_weld_loop_count_simulation.c -o prog_debug.exe
 Release:
     gcc -Wall -Wextra -Wshadow -std=c99 -DNDEBUG -O2 -s string_weld_loop_count_simulation.c -o prog_rel.exe
 
@@ -190,47 +191,52 @@ void Shuffle(uint32_t *bag, int32_t n, pcg32_random_t *rng)
 #define MAX_STRINGS_LG2 27
 #define MAX_NODES_LG2 (MAX_STRINGS_LG2 + 1)
 typedef uint32_t NodeId;
-struct StringGraph {
+struct ThreadParam {
     uint32_t nNodes; // nStrings * 2
-    NodeId *welds; // welds[x] == y means x is welded to y, and
-                   // if that is the case then welds[y] == x must be true 
+
+    /*
+     * welds[x] == y means x is welded to y, and
+     * if that is the case then welds[y] == x must be true
+     */
+    NodeId *welds; // length == nNodes;
+
+    uint32_t *randomBag; // length == nNodes;
 };
-typedef struct StringGraph StringGraph;
+typedef struct ThreadParam ThreadParam;
+
 #define StringConnection(x) ((x) ^ 1) // starting string connections, implicit
 
 #ifdef _DEBUG
 #define WELD_CHECK
 #endif
-void Contruct(StringGraph *sg, uint32_t nNodes)
+
+void Contruct(ThreadParam *sg, uint32_t nNodes)
 {
-    ASSERT(!(nNodes & 1)); // must be even
-    ASSERT(nNodes >= 2 && nNodes <= (1 << MAX_NODES_LG2));
-    NodeId *p = XMALLOC_TYPED(NodeId, nNodes);
+    VERIFY(!(nNodes & 1)); // must be even
+    VERIFY(nNodes >= 2 && nNodes <= (1 << MAX_NODES_LG2));
+    /* welds (NodeId[]) and randomBag (uint32_t[]) in same alloc: */
+    char *base = XMALLOC_TYPED(char, nNodes * (sizeof(NodeId) + sizeof(uint32_t)));
     sg->nNodes = nNodes;
-    sg->welds = p;
-#ifdef WELD_CHECK
-    for (uint32_t i = 0; i < nNodes; ++i) {
-        p[i] = -1;
-    }
-#endif
+    sg->welds = (NodeId *)base;
+    sg->randomBag = (uint32_t *) ((NodeId *)base + nNodes);
 }
 
-void Destroy(StringGraph *sg)
+void Destroy(ThreadParam *sg)
 {
     free(sg->welds);
 }
 
-void Weld(StringGraph *sg, NodeId a, NodeId b)
+void Weld(NodeId a, NodeId b, NodeId *welds, uint32_t nNodes)
 {
-    ASSERT(a < sg->nNodes && b < sg->nNodes);
+    ASSERT(a < nNodes && b < nNodes);
     ASSERT(a != b); // cant weld node to itself
 #ifdef WELD_CHECK
-    VERIFY(sg->welds[a] == (NodeId)-1); // should not already be welded
-    VERIFY(sg->welds[b] == (NodeId)-1); // should not already be welded
+    VERIFY(welds[a] == (NodeId)-1); // should not already be welded
+    VERIFY(welds[b] == (NodeId)-1); // should not already be welded
 #endif
 
-    sg->welds[a] = b;
-    sg->welds[b] = a;
+    welds[a] = b;
+    welds[b] = a;
 }
 
 uint32_t CountConnectedComponentsDestructive(uint32_t *welds, uint32_t nNodes)
@@ -264,10 +270,8 @@ uint32_t CountConnectedComponentsDestructive(uint32_t *welds, uint32_t nNodes)
 }
 
 
-uint32_t CountConnectedComponentsOrig(const StringGraph *g)
+uint32_t CountConnectedComponentsOrig(const uint32_t *welds, uint32_t nNodes)
 {
-    uint32_t const nNodes = g->nNodes;
-    NodeId const *const welds = g->welds;
     uint32_t const toVisitCapacity = nNodes * 2 + 2; // hmm
     NodeId *const toVisit = XMALLOC_TYPED(NodeId, toVisitCapacity);
     uint8_t *const visited = (uint8_t *)calloc(nNodes, sizeof(uint8_t)); // destructive idea
@@ -344,12 +348,15 @@ static void SimpleTest()
     };
     enum { NumWelds = sizeof(welds) / sizeof(welds[0]) };
 
-    StringGraph g;
+    ThreadParam g;
     Contruct(&g, 22);
+#ifdef WELD_CHECK
+    memset(g.welds, 0xff, g.nNodes * sizeof(NodeId)); // set everything to -1
+#endif
     for (int i = 0; i < NumWelds; ++i) {
-        Weld(&g, welds[i].a, welds[i].b);
+        Weld(welds[i].a, welds[i].b, g.welds, g.nNodes);
     }
-    int const otherMethodAnswer = CountConnectedComponentsOrig(&g);
+    int const otherMethodAnswer = CountConnectedComponentsOrig(g.welds, g.nNodes);
     int const result = CountConnectedComponentsDestructive(g.welds, g.nNodes);
     VERIFY(otherMethodAnswer == result);
     printf("%s: result=%d\n", __FUNCTION__, result);
@@ -366,8 +373,8 @@ static void Simulate(uint32_t const numStrings,
                      double const MillisecondsPerTickF64,
                      bool const bTest)
 {
-    ASSERT(numStrings && numStrings <= (1u << MAX_STRINGS_LG2));
-    ASSERT(numIters && numIters <= (1u << 15));
+    VERIFY(numStrings && numStrings <= (1u << MAX_STRINGS_LG2));
+    VERIFY(numIters && numIters <= (1u << 15));
 
     enum { NumIterTimingDiscard = 3 };
 
@@ -377,9 +384,9 @@ static void Simulate(uint32_t const numStrings,
     double countConnCompsMsAccum = 0.0;
     double totalMsAccum = 0.0;
 
-    StringGraph g;
+    ThreadParam g;
     Contruct(&g, numNodes);
-    uint32_t *const bag = XMALLOC_TYPED(uint32_t, numNodes);
+    uint32_t *const bag = g.randomBag;
     pcg32_random_t rng = PCG32_INITIALIZER;
 
     unsigned highestTrackedAnswer = 0;
@@ -395,7 +402,7 @@ static void Simulate(uint32_t const numStrings,
     for (uint32_t currentIter = 0; currentIter < numIters; ++currentIter) {
         int64_t const totalTicksBegin = TimerGetTicks();
     #ifdef WELD_CHECK
-        memset(g.welds, 0xff, numNodes * sizeof(NodeId));
+        memset(g.welds, 0xff, g.nNodes * sizeof(NodeId)); // set everything to -1
     #endif
         for (uint32_t i = 0; i < numNodes; ++i) {
             bag[i] = i;
@@ -403,10 +410,10 @@ static void Simulate(uint32_t const numStrings,
         TIME_IF(randgenMsAccum, Shuffle(bag, numNodes, &rng), currentIter >= NumIterTimingDiscard);
         /* do numNodes/2 welds, each closes 2 nodes: */
         for (uint32_t i = 0; i < numNodes; i += 2) { // NOTE: step = 2
-            Weld(&g, bag[i], bag[i + 1]);
+            Weld(bag[i], bag[i + 1], g.welds, g.nNodes);
         }
         unsigned answer;
-        unsigned const otherMethodAnswer = bTest ? CountConnectedComponentsOrig(&g) : 0;
+        unsigned const otherMethodAnswer = bTest ? CountConnectedComponentsOrig(g.welds, g.nNodes) : 0;
         TIME_IF(countConnCompsMsAccum,
                 answer = CountConnectedComponentsDestructive(g.welds, g.nNodes),
                 currentIter >= NumIterTimingDiscard);
@@ -458,7 +465,6 @@ static void Simulate(uint32_t const numStrings,
     VERIFY(sumOfCounts == numIters);
     printf("Average answer = %f\n", (double)sumOfAllAnswers / (double)numIters);
 
-    free(bag);
     Destroy(&g);
 }
 
