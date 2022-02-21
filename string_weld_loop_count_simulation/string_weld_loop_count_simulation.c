@@ -23,6 +23,39 @@ Release:
 This should compile as c++ too.
 */
 
+
+// Example usage/output:
+// Processor: Intel(R) Core(TM) i5-7200U CPU @ 2.50GHz   2.70 GHz
+// prog_rel.exe iters=1000 strings=1000000
+
+/*
+SimpleTest: result=5
+Succeeded to change process priority class from NORMAL -> ABOVE_NORMAL.
+Average milliseconds each iter (denom=997, first 3 iters discarded):
+RandGen: 28.188206, CountConnectedComponents: 56.485805, Everything: 104.909090
+
+Results for strings=1000000 iters=1000 seed=[[TODO]]:
+  1:     0
+  2:     6 ******
+  3:    15 ***************
+  4:    52 ****************************************************
+  5:   102 ******************************************************************************************************
+  6:   148 ****************************************************************************************************************************************************
+  7:   152 ********************************************************************************************************************************************************
+  8:   156 ************************************************************************************************************************************************************
+  9:   124 ****************************************************************************************************************************
+ 10:    97 *************************************************************************************************
+ 11:    66 ******************************************************************
+ 12:    36 ************************************
+ 13:    26 **************************
+ 14:    11 ***********
+ 15:     5 *****
+ 16:     4 ****
+Average answer = 7.850000
+NDEBUG defined
+*/
+
+
 #ifndef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
 #endif
@@ -239,6 +272,20 @@ void Weld(NodeId a, NodeId b, NodeId *welds, uint32_t nNodes)
     welds[b] = a;
 }
 
+/*
+    The "Destructive" part means that the welds[] is not preserved.
+    This allows not needing an extra visited[], though this isn't a big win.
+
+    The neat part is that usually for flood-fill or graph traversal
+    (DFS, BFS, etc) algorithms, a data structure is needed to store
+    nodes to visit later (this data structure might be the program stack
+    for recursive methods). However, since we know here that all the connected
+    components form a circle, going in the same direction (e.g "counter-clockwise")
+    each time is enough to traverse every node in the loop. Thus, we don't need a
+    data structure to store nodes to visit.
+
+    This algorithm uses O(1) extra space.
+*/
 uint32_t CountConnectedComponentsDestructive(uint32_t *welds, uint32_t nNodes)
 {
     uint32_t result = 0;
@@ -269,36 +316,42 @@ uint32_t CountConnectedComponentsDestructive(uint32_t *welds, uint32_t nNodes)
     return result;
 }
 
-
+/*
+    A less slick method than the version above.
+    Kept around as a debug check that they get the same answer.
+*/
 uint32_t CountConnectedComponentsOrig(const uint32_t *welds, uint32_t nNodes)
 {
     uint32_t const toVisitCapacity = nNodes * 2 + 2; // hmm
     NodeId *const toVisit = XMALLOC_TYPED(NodeId, toVisitCapacity);
-    uint8_t *const visited = (uint8_t *)calloc(nNodes, sizeof(uint8_t)); // destructive idea
-    VERIFY(visited != NULL);
+    uint8_t *const visitedOrWillBe = (uint8_t *)calloc(nNodes, sizeof(uint8_t)); // bool[]
+    VERIFY(visitedOrWillBe != NULL);
     uint32_t result = 0;
     uint32_t nNodesAllComponents = 0;
     for (uint32_t outerIter = 0; outerIter < nNodes; outerIter += 2) { // NOTE: can step by 2
-        if (!visited[outerIter]) {
+        if (!visitedOrWillBe[outerIter]) {
             /* flood-fill */
             uint32_t currentNodeId = outerIter;
             uint32_t nToVisit = 0;
             uint32_t nNodesThisComponent = 0;
+            visitedOrWillBe[currentNodeId] = true;
             for (;;) {
-                if (!visited[currentNodeId]) {
-                    uint32_t const a = StringConnection(currentNodeId);
-                    uint32_t const b = welds[currentNodeId];
-                    /* NOTE: a == b is possible here. */
-                    assert(b != currentNodeId);
-                    assert(a < nNodes && b < nNodes);
-                    visited[currentNodeId] = true;
-                    nNodesThisComponent++;
-                    if (!visited[a]) {
-                        toVisit[nToVisit++] = a;
-                    }
-                    if (!visited[b] && a != b) {
-                        toVisit[nToVisit++] = b;
-                    }
+                /* visit currentNodeId: */
+                ASSERT(visitedOrWillBe[currentNodeId]);
+                uint32_t const a = StringConnection(currentNodeId);
+                uint32_t const b = welds[currentNodeId];
+                /* NOTE: a == b is possible here. */
+                assert(b != currentNodeId);
+                assert(a < nNodes && b < nNodes);
+
+                nNodesThisComponent++;
+                if (!visitedOrWillBe[a]) {
+                    toVisit[nToVisit++] = a;
+                    visitedOrWillBe[a] = true;
+                }
+                if (!visitedOrWillBe[b]) {
+                    toVisit[nToVisit++] = b;
+                    visitedOrWillBe[b] = true;
                 }
 
                 if (nToVisit) {
@@ -316,10 +369,10 @@ uint32_t CountConnectedComponentsOrig(const uint32_t *welds, uint32_t nNodes)
     ASSERT(nNodes == nNodesAllComponents);
 #ifdef _DEBUG
     for (uint32_t i = 0; i < nNodes; ++i) {
-        ASSERT(visited[i]);
+        ASSERT(visitedOrWillBe[i]);
     }
 #endif
-    free(visited);
+    free(visitedOrWillBe);
     free(toVisit);
     return result;
 }
@@ -443,7 +496,7 @@ static void Simulate(uint32_t const numStrings,
             totalMsAccum * r);
     }
 
-    printf("Results for strings=%d iters=%d seed=???:\n", numStrings, numIters);
+    printf("Results for strings=%d iters=%d seed=[[TODO]]:\n", numStrings, numIters);
     VERIFY(histo[0] == 0);
     uint32_t sumOfCounts = 0;
     int64_t sumOfAllAnswers = 0;
@@ -544,50 +597,3 @@ int main(int argc, char **argv)
 #endif
     return 0;
 }
-// ^^^ revert that back.
-// do the amllocs once.
-// flood fill loop idea, no need to visit thing.
-// WELD check
-
-
-/*
-
-Results for strings=1000000, iters=1000, seed=???:
-  0:     0
-  1:     0
-  2:     6 ******
-  3:    15 ***************
-  4:    52 ****************************************************
-  5:   102 ******************************************************************************************************
-  6:   148 ****************************************************************************************************************************************************
-  7:   152 ********************************************************************************************************************************************************
-  8:   156 ************************************************************************************************************************************************************
-  9:   124 ****************************************************************************************************************************
- 10:    97 *************************************************************************************************
- 11:    66 ******************************************************************
- 12:    36 ************************************
- 13:    26 **************************
- 14:    11 ***********
- 15:     5 *****
- 16:     4 ****
-
-*/
-
-/*
-Succeeded to change process priority class from NORMAL -> ABOVE_NORMAL.
-Average milliseconds each iter (denom=128, first 3 iters discarded):
-RandGen: 0.787859, CountConnectedComponents: 1.083199, Everything: 2.260526
-
-Results for strings=64123 iters=131 seed=???:
-  1:     0
-  2:     3 ***
-  3:     9 *********
-  4:     9 *********
-  5:    26 **************************
-  6:    16 ****************
-  7:    28 ****************************
-  8:    22 **********************
-  9:     8 ********
- 10:     7 *******
- 11:     3 ***
-*/
