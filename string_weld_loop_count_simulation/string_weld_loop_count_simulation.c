@@ -406,64 +406,22 @@ void SimpleTest()
         exit(EXIT_FAILURE);
     }
     StringGraph_Destroy(&g);
-    puts("\n\n");
 }
 
 
-int main(int argc, char **argv)
+static void Simulate(uint32_t const numStrings, uint32_t const numIters, double const MillisecondsPerTickF64)
 {
-    SimpleTest();
+	ASSERT(numStrings && numStrings <= (1u << MAX_STRINGS_LG2));
+	ASSERT(numIters && numIters <= (1u << 15));
+	
+	enum { NumIterTimingDiscard = 3 };
+	
+    uint32_t const numNodes = numStrings * 2;
 
-    // uint64_t seed = ...;
-    uint32_t numIters = 30;
-    uint32_t numStrings = 1u << 15;
-
-    for (int i = 1; i < argc; ++i) {
-        const char *arg = argv[i];
-        int val;
-        if (sscanf(arg, "iters=%d", &val) == 1) {
-            if (val <= 0 || val > (1 << 10)) {
-                puts("bad iter count");
-                return EXIT_FAILURE;
-            }
-            numIters = val;
-        }
-        else if (sscanf(arg, "strings=%d", &val) == 1) {
-            if (val <= 0 || val > (1 << MAX_STRINGS_LG2)) {
-                puts("bad string count");
-                return EXIT_FAILURE;
-            }
-            numStrings = val;
-        }
-        else {
-            printf("unknown argv[%d]=%s\n", i, arg);
-            return EXIT_FAILURE;
-        }
-    }
-
-    enum { NumIterTimingDiscard = 3 };
-
-#if !defined(_DEBUG)
-    /* Increase priority to try and make timers more consistent due to less context switches(?): */
-    if (numIters > NumIterTimingDiscard) {
-        HANDLE const hThisProcess = GetCurrentProcess();
-        DWORD const startPriorityClass = GetPriorityClass(hThisProcess);
-        if (startPriorityClass == NORMAL_PRIORITY_CLASS) {
-            BOOL ok = SetPriorityClass(hThisProcess, ABOVE_NORMAL_PRIORITY_CLASS);
-            printf("%s to change process priority class from NORMAL -> ABOVE_NORMAL.\n", ok ? "Succeeded" : "FAILED");
-        }
-        else {
-            printf("Start priority class == 0x%X.\n", (unsigned int) startPriorityClass);
-        }
-    }
-#endif
-
-    const double MillisecondsPerTickF64 = 1000.0 / (double) TimerTicksPerSecond();
     double randgenMsAccum = 0.0;
     double countConnCompsMsAccum = 0.0;
     double totalMsAccum = 0.0;
 
-    uint32_t const numNodes = numStrings * 2;
     StringGraph g;
     StringGraph_Contruct(&g, numNodes);
     uint32_t *const bag = XMALLOC_TYPED(uint32_t, numNodes);
@@ -538,12 +496,89 @@ int main(int argc, char **argv)
         }
     }
     if (sumOfCounts != numIters) {
-        puts("\noops\n");
+        puts("\noops!\n");
+		exit(EXIT_FAILURE);
     }
     printf("Average answer = %f\n", (double)sumOfAllAnswers / (double)numIters);
 
     free(bag);
     StringGraph_Destroy(&g);
+}
+
+int main(int argc, char **argv)
+{
+    SimpleTest();
+
+    // uint64_t seed = ...;
+    uint32_t numIters = 30;
+    uint32_t numStrings = 1u << 15;
+	bool bDebugTest = false;
+
+    for (int i = 1; i < argc; ++i) {
+        const char *arg = argv[i];
+        int val;
+        if (sscanf(arg, "iters=%d", &val) == 1) {
+            if (val <= 0 || val > (1 << 15)) {
+                puts("bad iter count");
+                return EXIT_FAILURE;
+            }
+            numIters = val;
+        }
+        else if (sscanf(arg, "strings=%d", &val) == 1) {
+            if (val <= 0 || val > (1 << MAX_STRINGS_LG2)) {
+                puts("bad string count");
+                return EXIT_FAILURE;
+            }
+            numStrings = val;
+        }
+		else if (strcmp(arg, "test") == 0) {
+			bDebugTest = true;
+		}
+        else {
+            printf("unknown argv[%d]=%s\n", i, arg);
+            return EXIT_FAILURE;
+        }
+    }
+
+#if !defined(_DEBUG)
+    /* Increase priority to try and make timers more consistent due to less context switches(?): */
+    if (numIters >= 8) {
+        HANDLE const hThisProcess = GetCurrentProcess();
+        DWORD const startPriorityClass = GetPriorityClass(hThisProcess);
+        if (startPriorityClass == NORMAL_PRIORITY_CLASS) {
+            BOOL ok = SetPriorityClass(hThisProcess, ABOVE_NORMAL_PRIORITY_CLASS);
+            printf("%s to change process priority class from NORMAL -> ABOVE_NORMAL.\n", ok ? "Succeeded" : "FAILED");
+        }
+        else {
+            printf("Start priority class == 0x%X.\n", (unsigned int) startPriorityClass);
+        }
+    }
+#endif
+
+    const double MillisecondsPerTickF64 = 1000.0 / (double) TimerTicksPerSecond();
+	
+	if (!bDebugTest) {
+		Simulate(numStrings, numIters, MillisecondsPerTickF64);
+	}
+	else {
+		puts("doing debug test");		
+		for (int32_t x = -17; x <= 17; ++x) {
+			int32_t newIterCount = numIters + x;
+			if (newIterCount >= 1) {
+				Simulate(numStrings, newIterCount, MillisecondsPerTickF64);
+			}
+		}
+	}
+
+	if (sizeof(void *) != 8) {
+		puts("not 64 bit");
+	}
+#ifdef _DEBUG
+	puts("_DEBUG defined");
+#endif
+#ifdef NDEBUG
+	puts("NDEBUG defined");
+#endif
     return 0;
 }
 // ^^^ revert that back.
