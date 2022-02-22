@@ -1,14 +1,14 @@
 /*
 
-Setup: N strings, each having 2 "nodes" conected but the string.
+Setup: N strings, each having 2 "nodes" connected to each end of the string.
 
-Then while there exists a node that hasn't been helded to another node
+Then while there exists a node that hasn't been welded to another node,
 pick 2 random nodes and weld them. A node cannot be welded to itself.
 
 After this is done, how many loops are formed?
 See SimpleTest() for an example.
 
-Skip to string @end_util for interesting parts.
+Skip to the @end_util marker in this document for the interesting parts.
 
 ---
 
@@ -60,11 +60,9 @@ NDEBUG defined
 #define _CRT_SECURE_NO_WARNINGS
 #endif
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
+#if !defined(_POSIX_C_SOURCE) || _POSIX_C_SOURCE < 199309L
+#define _POSIX_C_SOURCE 199309L
 #endif
-#include <Windows.h>
-
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,8 +74,23 @@ NDEBUG defined
 
 
 // OS util: -------------------------------------------------------------------
-int64_t TimerTicksPerSecond() { LARGE_INTEGER li; QueryPerformanceFrequency(&li); return li.QuadPart; }
-int64_t TimerGetTicks() { LARGE_INTEGER li; QueryPerformanceCounter(&li); return li.QuadPart; }
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <Windows.h>
+int64_t TimerTicksPerSecond(void) { LARGE_INTEGER li; QueryPerformanceFrequency(&li); return li.QuadPart; }
+int64_t TimerGetTicks(void) { LARGE_INTEGER li; QueryPerformanceCounter(&li); return li.QuadPart; }
+#else
+#include <time.h>
+#define TimerTicksPerSecond() 1000000000ll // ((long long)1e9)
+int64_t TimerGetTicks(void)
+{
+   struct timespec ts;
+   clock_gettime(CLOCK_MONOTONIC, &ts);
+   return TimerTicksPerSecond() * (uint64_t)ts.tv_sec + ts.tv_nsec;
+}
+#endif
 // ----------------------------------------------------------------------------
 
 
@@ -200,15 +213,9 @@ uint32_t pcg32_boundedrand_r(pcg32_random_t* rng, uint32_t bound)
 // @end_util:
 
 
-// Fisher–Yates/Knuth shuffle:
+// Fisher-Yates/Knuth shuffle:
 void Shuffle(uint32_t *bag, int32_t n, pcg32_random_t *rng)
 {
-    /*
-        for (int i = n-1; i > 0; i--) {
-            int j = UniformRandomExclusive(i + 1);
-            Swap(ref bag[i], ref bag[j]);
-        }
-    */
     while (n >= 2) {
         uint32_t j = pcg32_boundedrand_r(rng, n); // result in [0, n)
         uint32_t i = --n;
@@ -229,7 +236,9 @@ struct ThreadParam {
 
     /*
      * welds[x] == y means x is welded to y, and
-     * if that is the case then welds[y] == x must be true
+     * if that is the case then welds[y] == x must be true.
+     * Each value is a unique integer in [0, nNodes),
+     * and welds[i] != i
      */
     NodeId *welds; // length == nNodes;
 
@@ -243,20 +252,20 @@ typedef struct ThreadParam ThreadParam;
 #define WELD_CHECK
 #endif
 
-void Contruct(ThreadParam *sg, uint32_t nNodes)
+void Construct(ThreadParam *g, uint32_t nNodes)
 {
     VERIFY(!(nNodes & 1)); // must be even
     VERIFY(nNodes >= 2 && nNodes <= (1 << MAX_NODES_LG2));
     /* welds (NodeId[]) and randomBag (uint32_t[]) in same alloc: */
     char *base = XMALLOC_TYPED(char, nNodes * (sizeof(NodeId) + sizeof(uint32_t)));
-    sg->nNodes = nNodes;
-    sg->welds = (NodeId *)base;
-    sg->randomBag = (uint32_t *) ((NodeId *)base + nNodes);
+    g->nNodes = nNodes;
+    g->welds = (NodeId *)base;
+    g->randomBag = (uint32_t *) ((NodeId *)base + nNodes);
 }
 
-void Destroy(ThreadParam *sg)
+void Destroy(ThreadParam *g)
 {
-    free(sg->welds);
+    free(g->welds);
 }
 
 void Weld(NodeId a, NodeId b, NodeId *welds, uint32_t nNodes)
@@ -267,6 +276,7 @@ void Weld(NodeId a, NodeId b, NodeId *welds, uint32_t nNodes)
     VERIFY(welds[a] == (NodeId)-1); // should not already be welded
     VERIFY(welds[b] == (NodeId)-1); // should not already be welded
 #endif
+   (void)nNodes; // only used for assert
 
     welds[a] = b;
     welds[b] = a;
@@ -284,14 +294,21 @@ void Weld(NodeId a, NodeId b, NodeId *welds, uint32_t nNodes)
     each time is enough to traverse every node in the loop. Thus, we don't need a
     data structure to store nodes to visit.
 
-    This algorithm uses O(1) extra space.
+    This algorithm uses O(1) extra space. A non-destructive version
+    is doeable with O(NumNodes/2) space for a visited[] bool array, or 1/8 that
+    for a bitset.
+
+    The runtime complexity of this is O(NumNodes).
+
+    For smaller node counts, this appears faster than Shuffle(), but is slower
+    for larger node counts.
 */
 uint32_t CountConnectedComponentsDestructive(uint32_t *welds, uint32_t nNodes)
 {
     uint32_t result = 0;
     uint32_t nStringsAllComponents = 0;
     for (uint32_t outerIter = 0; outerIter < nNodes; outerIter += 2) { // NOTE: step by 2
-        if ((int32_t)welds[outerIter] >= 0) {
+        if ((int32_t)welds[outerIter] >= 0) { // unlikely
             int32_t currentNodeId = outerIter;
             uint32_t nStringsThisComponent = 0;
             uint32_t weldConn;
@@ -377,11 +394,11 @@ uint32_t CountConnectedComponentsOrig(const uint32_t *welds, uint32_t nNodes)
     return result;
 }
 
-static void SimpleTest()
+static void SimpleTest(void)
 {
     static const struct {
         uint8_t a, b;
-    } welds[] = {
+    } WeldsToMake[] = {
         // 1-string loop:
         { 0, 1 },
         // 3-string loop:
@@ -399,25 +416,24 @@ static void SimpleTest()
         { 21, 18 },
         { 19, 20 },
     };
-    enum { NumWelds = sizeof(welds) / sizeof(welds[0]) };
-
-    ThreadParam g;
-    Contruct(&g, 22);
+    enum {
+       NumWeldsToMake = sizeof(WeldsToMake) / sizeof(WeldsToMake[0]),
+       NumNodes = NumWeldsToMake * 2
+    };
+    NodeId welds[NumNodes];
 #ifdef WELD_CHECK
-    memset(g.welds, 0xff, g.nNodes * sizeof(NodeId)); // set everything to -1
+    memset(welds, 0xff, NumNodes * sizeof(NodeId)); // set everything to -1
 #endif
-    for (int i = 0; i < NumWelds; ++i) {
-        Weld(welds[i].a, welds[i].b, g.welds, g.nNodes);
+    for (int i = 0; i < NumWeldsToMake; ++i) {
+        Weld(WeldsToMake[i].a, WeldsToMake[i].b, welds, NumNodes);
     }
-    int const otherMethodAnswer = CountConnectedComponentsOrig(g.welds, g.nNodes);
-    int const result = CountConnectedComponentsDestructive(g.welds, g.nNodes);
+    int const otherMethodAnswer = CountConnectedComponentsOrig(welds, NumNodes);
+    int const result = CountConnectedComponentsDestructive(welds, NumNodes);
     VERIFY(otherMethodAnswer == result);
-    printf("%s: result=%d\n", __FUNCTION__, result);
     if (result != 5) {
         puts(" *** TEST FAILED ***");
         exit(EXIT_FAILURE);
     }
-    Destroy(&g);
 }
 
 
@@ -438,7 +454,7 @@ static void Simulate(uint32_t const numStrings,
     double totalMsAccum = 0.0;
 
     ThreadParam g;
-    Contruct(&g, numNodes);
+    Construct(&g, numNodes);
     uint32_t *const bag = g.randomBag;
     pcg32_random_t rng = PCG32_INITIALIZER;
 
@@ -556,7 +572,7 @@ int main(int argc, char **argv)
         }
     }
 
-#if !defined(_DEBUG)
+#if !defined(_DEBUG) && defined(_WIN32)
     /* Increase priority to try and make timers more consistent due to less context switches(?): */
     if (numIters >= 8) {
         HANDLE const hThisProcess = GetCurrentProcess();
