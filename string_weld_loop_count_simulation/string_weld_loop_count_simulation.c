@@ -10,15 +10,23 @@ Descriptions on some other sites:
 https://www.quora.com/You-have-a-bag-with-x-number-of-pieces-of-strings-in-it-You-randomly-grab-two-ends-and-tie-them-together-until-there-are-no-more-loose-ends-When-you-finish-doing-this-what-is-the-expected-number-of-loops-strings
 https://www.reddit.com/r/riddles/comments/2byu4g/you_have_a_bag_of_with_n_number_of_strings_at/
 
-Solution for N strings (ropes):
-    Harmonic(2N) - Harmonic(N)/2
-Where:
-    Harmonic(n) = 1 + 1/2 + 1/3 + ... + 1/n 
-Approximate solution:
-    ln(N)/2 + 0.98
-    
-So for N = 1,000,000 the expected number of loops is approximately 7.91,
-which is quite close to result of this programs Monte Carlo simulation.
+Solution F(N) for N >= 2 (F(1) = 1) strings (ropes):
+   = (1/(2N - 1)) * (1 + F(N - 1)) + (1 - 1/(2N-1)) * F(N - 1)
+   = (probability of forming a loop on first step) * (1 + F(N - 1)) +
+     (1 - that probability) * F(N-1). When tieing two strings together that dont
+     form a loop, we can pretend they result in just 1 longer string, since it
+     still has exactly 2 open ends.
+
+   = F(N - 1) + 1/(2N - 1)
+   = 1 + 1/3 + 1/5 + 1/7 + 1/9 + ... + 1/N
+   = Harmonic(2N) - Harmonic(N)/2
+
+Approximate solution, using H(n) ~= ln(n) + Gamma + 1/(2n) - 1/(12n^2)
+and Gamma ~= 0.57721566490 for N = 1,000,000 is ~= 7.889510,
+which is quite close to this programs Monte Carlo simulation result of
+7.850000 for 1000 iterations with the default random seed.
+
+A rougher approximation for the expected number of loops is ~= ln(N)/2 + 1.
 
 ## This program's design and view of the problem:
 
@@ -52,11 +60,14 @@ Some possible ways to compile this:
 
 Debug:
     gcc -Wall -Wextra -Wshadow -std=c99 -D_DEBUG -g string_weld_loop_count_simulation.c -o prog_debug.exe
-    g++ -x c++ -std=c++14 -Wall -Wextra -Wshadow -D_DEBUG -g string_weld_loop_count_simulation.c -o prog_debug.exe
 Release:
     gcc -Wall -Wextra -Wshadow -std=c99 -DNDEBUG -O2 -s string_weld_loop_count_simulation.c -o prog_rel.exe
 
-This should compile as c++ too.
+Linux release, notice -lm:
+   gcc -Wall -Wextra -Wshadow -std=c99 -DNDEBUG -O2 -s string_weld_loop_count_simulation.c -lm -o prog_rel.out
+
+This should compile as c++ too, e.g:
+   g++ -x c++ -std=c++14 -Wall -Wextra -Wshadow -D_DEBUG -g string_weld_loop_count_simulation.c -o prog_debug.exe
 */
 
 
@@ -473,6 +484,29 @@ static void SimpleTest(void)
 }
 
 
+//https://www.johndcook.com/blog/2017/04/18/computing-harmonic-numbers/
+//http://fredrik-j.blogspot.com/2009/02/how-not-to-compute-harmonic-numbers.html
+#include <math.h> // leeds to link with -lm on Linux
+#define EulerGammaConstant 0.5772156649015328606065120
+static double Harmonic(int32_t n_int)
+{
+   ASSERT(n_int >= 1);
+   if (n_int <= 16) {
+      double sum = 0.0;
+      do {
+         sum += 1.0 / (n_int);
+      } while (--n_int);
+      return sum;
+   } else {
+      // H(n) ~= ln(n) + Gamma + 1/(2n) - 1/(12n^2) + ...
+      double const n = n_int;
+      double r = log(n);
+      r += EulerGammaConstant + 1.0/(n + n) - 1.0/(12*n*n);
+      return r;
+   }
+}
+
+
 static void Simulate(uint32_t const numStrings,
                      uint32_t const numIters,
                      double const MillisecondsPerTickF64,
@@ -568,7 +602,9 @@ static void Simulate(uint32_t const numStrings,
         }
     }
     VERIFY(sumOfCounts == numIters);
-    printf("Average answer = %f\n", (double)sumOfAllAnswers / (double)numIters);
+    printf("Average answer = %f, approx expected answer = %f\n",
+            (double)sumOfAllAnswers / (double)numIters,
+            Harmonic(numStrings * 2) - Harmonic(numStrings)/2.0);
 
     Destroy(&g);
 }
