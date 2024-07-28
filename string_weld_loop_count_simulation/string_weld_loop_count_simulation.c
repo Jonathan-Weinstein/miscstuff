@@ -530,7 +530,7 @@ static void Simulate(uint32_t const numStrings,
 
     unsigned highestTrackedAnswer = 0;
     enum { HistoCap = 128 };
-    uint16_t histo[HistoCap] = { };
+    uint16_t histo[HistoCap] = { 0 };
 
 #define TIME_IF(accum, expr, cond) { \
     int64_t _ticksBegin = TimerGetTicks(); \
