@@ -468,20 +468,18 @@ static void SimpleTest(void)
 #define EulerGammaConstant 0.5772156649015328606065120
 static double Harmonic(int32_t n_int)
 {
-   ASSERT(n_int >= 1);
-   if (n_int <= 16) {
-      double sum = 0.0;
-      do {
-         sum += 1.0 / (n_int);
-      } while (--n_int);
-      return sum;
-   } else {
-      // H(n) ~= ln(n) + Gamma + 1/(2n) - 1/(12n^2) + ...
-      double const n = n_int;
-      double r = log(n);
-      r += EulerGammaConstant + 1.0/(n + n) - 1.0/(12*n*n);
-      return r;
-   }
+    ASSERT(n_int >= 1);
+    if (n_int <= 16) {
+        double sum = 0.0;
+        do {
+            sum += 1.0 / (n_int);
+        } while (--n_int);
+        return sum;
+    } else {
+        double n = n_int;
+        // H(n) ~= ln(n) + Gamma + 1/(2n) - 1/(12n^2) + ...
+        return log(n) + EulerGammaConstant + 1.0/(n + n) - 1.0/(12*n*n);
+    }
 }
 
 static void Simulate(uint32_t const numStrings,
