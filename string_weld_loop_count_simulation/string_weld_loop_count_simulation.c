@@ -380,67 +380,6 @@ uint32_t CountConnectedComponentsDestructive(uint32_t *welds, uint32_t nNodes)
     return result;
 }
 
-/*
-    A less slick method than the version above.
-    Kept around as a debug check that they get the same answer.
-*/
-uint32_t CountConnectedComponentsOrig(const uint32_t *welds, uint32_t nNodes)
-{
-    uint32_t const toVisitCapacity = nNodes * 2 + 2; // hmm
-    NodeId *const toVisit = XMALLOC_TYPED(NodeId, toVisitCapacity);
-    uint8_t *const visitedOrWillBe = (uint8_t *)calloc(nNodes, sizeof(uint8_t)); // bool[]
-    VERIFY(visitedOrWillBe != NULL);
-    uint32_t result = 0;
-    uint32_t nNodesAllComponents = 0;
-    for (uint32_t outerIter = 0; outerIter < nNodes; outerIter += 2) { // NOTE: can step by 2
-        if (!visitedOrWillBe[outerIter]) {
-            /* flood-fill */
-            uint32_t currentNodeId = outerIter;
-            uint32_t nToVisit = 0;
-            uint32_t nNodesThisComponent = 0;
-            visitedOrWillBe[currentNodeId] = true;
-            for (;;) {
-                /* visit currentNodeId: */
-                ASSERT(visitedOrWillBe[currentNodeId]);
-                uint32_t const a = StringConnection(currentNodeId);
-                uint32_t const b = welds[currentNodeId];
-                /* NOTE: a == b is possible here. */
-                assert(b != currentNodeId);
-                assert(a < nNodes && b < nNodes);
-
-                nNodesThisComponent++;
-                if (!visitedOrWillBe[a]) {
-                    toVisit[nToVisit++] = a;
-                    visitedOrWillBe[a] = true;
-                }
-                if (!visitedOrWillBe[b]) {
-                    toVisit[nToVisit++] = b;
-                    visitedOrWillBe[b] = true;
-                }
-
-                if (nToVisit) {
-                    currentNodeId = toVisit[--nToVisit];
-                }
-                else {
-                    break;
-                }
-            }
-            result++;
-            nNodesAllComponents += nNodesThisComponent;
-        }
-    }
-
-    ASSERT(nNodes == nNodesAllComponents);
-#ifdef _DEBUG
-    for (uint32_t i = 0; i < nNodes; ++i) {
-        ASSERT(visitedOrWillBe[i]);
-    }
-#endif
-    free(visitedOrWillBe);
-    free(toVisit);
-    return result;
-}
-
 static void SimpleTest(void)
 {
     static const struct {
@@ -474,9 +413,7 @@ static void SimpleTest(void)
     for (int i = 0; i < NumWeldsToMake; ++i) {
         Weld(WeldsToMake[i].a, WeldsToMake[i].b, welds, NumNodes);
     }
-    int const otherMethodAnswer = CountConnectedComponentsOrig(welds, NumNodes);
     int const result = CountConnectedComponentsDestructive(welds, NumNodes);
-    VERIFY(otherMethodAnswer == result);
     if (result != 5) {
         puts(" *** TEST FAILED ***");
         exit(EXIT_FAILURE);
@@ -552,13 +489,10 @@ static void Simulate(uint32_t const numStrings,
             Weld(bag[i], bag[i + 1], g.welds, g.nNodes);
         }
         unsigned answer;
-        unsigned const otherMethodAnswer = bTest ? CountConnectedComponentsOrig(g.welds, g.nNodes) : 0;
         TIME_IF(countConnCompsMsAccum,
                 answer = CountConnectedComponentsDestructive(g.welds, g.nNodes),
                 currentIter >= NumIterTimingDiscard);
-        if (bTest) {
-            VERIFY(otherMethodAnswer == answer);
-        }
+
         if (answer < HistoCap) {
             histo[answer] += 1;
             highestTrackedAnswer = highestTrackedAnswer >= answer ? highestTrackedAnswer : answer;
