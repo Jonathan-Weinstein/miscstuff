@@ -380,6 +380,47 @@ uint32_t CountConnectedComponentsDestructive(uint32_t *welds, uint32_t nNodes)
     return result;
 }
 
+/*
+ * Array "a" is of length nBalls and is pre-allocated.
+ *
+ * In the implementation, a[i] represents the current free ball of the _composite_ string
+ * the ball of a[i] is attached to. After connecting verts "x" and "y", a[x] and a[y] do not matter.
+ */
+uint32_t SimulateAndCountLoopsMethod2(uint32_t nVerts, const uint32_t *__restrict shuffledDeck, uint32_t * __restrict a)
+{
+    // Starting state
+    for (uint32_t i = 0; i < nVerts; ++i) {
+        a[i] = i ^ 1;
+    }
+
+    uint32_t nLoops = 0;
+
+    for (uint32_t i2 = 0; i2 < nVerts; i2 += 2) {
+        /*
+            Connect v1 to v2:
+
+            *---*     *---*     ->    *------*
+            v0  v1    v2  v3          v0     v3
+        */
+        uint32_t const v1 = shuffledDeck[i2];
+        uint32_t const v2 = shuffledDeck[i2 + 1];
+
+        uint32_t const v0 = a[v1];
+        uint32_t const v3 = a[v2];
+
+        a[v0] = v3;
+        a[v3] = v0;
+
+        ASSERT((v0 == v2) == (v3 == v1));
+
+        if (v0 == v2) {
+            nLoops++;
+        }
+    }
+
+    return nLoops;
+}
+
 static void SimpleTest(void)
 {
     static const struct {
@@ -443,7 +484,6 @@ static double Harmonic(int32_t n_int)
    }
 }
 
-
 static void Simulate(uint32_t const numStrings,
                      uint32_t const numIters,
                      double const MillisecondsPerTickF64,
@@ -459,6 +499,7 @@ static void Simulate(uint32_t const numStrings,
     double randgenMsAccum = 0.0;
     double countConnCompsMsAccum = 0.0;
     double totalMsAccum = 0.0;
+    double method2MsAccum = 0.0;
 
     ThreadParam g;
     Construct(&g, numNodes);
@@ -492,7 +533,13 @@ static void Simulate(uint32_t const numStrings,
         TIME_IF(countConnCompsMsAccum,
                 answer = CountConnectedComponentsDestructive(g.welds, g.nNodes),
                 currentIter >= NumIterTimingDiscard);
-
+        if (bTest && currentIter >= NumIterTimingDiscard) {
+            int64_t const t0 = TimerGetTicks();
+            unsigned const answerMethod2 = SimulateAndCountLoopsMethod2(numNodes, bag, g.welds); // not "welds here"
+            int64_t const t1 = TimerGetTicks();
+            method2MsAccum += (double)(t1 - t0) * MillisecondsPerTickF64;
+            VERIFY(answerMethod2 == answer);
+        }
         if (answer < HistoCap) {
             histo[answer] += 1;
             highestTrackedAnswer = highestTrackedAnswer >= answer ? highestTrackedAnswer : answer;
@@ -509,10 +556,11 @@ static void Simulate(uint32_t const numStrings,
         int denom = numIters - NumIterTimingDiscard;
         double const r = 1.0 / denom;
         printf("Average milliseconds each iter (denom=%d, first %d iters discarded):\n"
-            "RandGen: %f, CountConnectedComponents: %f, Everything: %f\n\n",
+            "RandGen: %f, CountConnectedComponents: %f, Method2: %f, Everything: %f\n\n",
             denom, NumIterTimingDiscard,
             randgenMsAccum * r,
             countConnCompsMsAccum *r,
+            method2MsAccum * r,
             totalMsAccum * r);
     }
 
