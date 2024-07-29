@@ -32,8 +32,8 @@ A rougher approximation for the expected number of loops is ~= ln(N)/2 + 1.
 
     Method 1
         >>> orignal/old and worse than method 2 <<<
-              I mainly like it for how CountConnectedComponentsDestructive doesn't need to keep a "visited" set
-              for the graph traversal:
+              I mainly like it for how CountConnectedComponentsDestructive doesn't need to keep a
+              queue/stack/etc of nodes to visit later for the graph traversal.
 
         Each of the N strings has 2 "nodes" connected to each end of the string,
         so there are 2N nodes in total. Each node is represented by a unique integer
@@ -370,9 +370,11 @@ static uint32_t CountConnectedComponentsDestructive(uint32_t *welds, uint32_t nu
  *
  * In the implementation, a[x] is the node x is welded to.
  *
- * For both small and large numNodes, this method seems inferior peformance wise to method2. Method2 is also less code.
+ * For both small and large numNodes, this method seems inferior peformance wise to Method2. Method2 is also less code.
  */
-static uint32_t SimulateAndCountLoopsMethod1(uint32_t numNodes, const uint32_t* __restrict shuffledDeck, uint32_t* __restrict a)
+static uint32_t SimulateAndCountLoopsMethod1(uint32_t                   numNodes,
+                                             const uint32_t *__restrict shuffledDeck,
+                                             uint32_t       *__restrict a)
 {
 #ifdef _DEBUG
 #define WELD_CHECK
@@ -398,14 +400,30 @@ static uint32_t SimulateAndCountLoopsMethod1(uint32_t numNodes, const uint32_t* 
 }
 
 /*
- * Array "a" is of length numNodes and is pre-allocated.
+ * Each string has two ends ("nodes"). The string implicitly connects node (i) to node (i^1).
+ * We can tie ("weld" is the previous lingo) a node to any other node. A node can only be tied to a single other node.
  *
- * In the implementation, a[i] represents the current free ball of the _composite_ string
- * the ball of a[i] is attached to. After connecting nodes "x" and "y", a[x] and a[y] do not matter.
+ * Note that when two nodes are tied and if that doesn't close a loop,
+ * the whole connected structure can then be thought of as just a single larger "composite" string, since nothing
+ * else can be done with the internal nodes.
  *
- * This method seems better than method1 for all numNodes tried, and is less code too.
+ * shuffledDeck contains distinct integers in [0, numNodes) in pseudo-random order.
+ *
+ * We must simulate tieing pairs of nodes in shuffledDeck, then counting the number of loops.
+ *
+ * Array "a" is scratch memory of length numNodes and is pre-allocated by the caller
+ * (so we don't malloc/free multiple times when we call this in a loop).
+ *
+ * In the implementation, a[i] represents the "current" free node of the whole composite string
+ * the node a[i] is attached to. After connecting nodes "x" and "y" we don't care about a[x] and a[y].
+ *
+ * We can detect when we are closing a loop and increment the result as we are doing the tieings.
+ *
+ * This method seems better than Method1 for all numNodes tried, and is less code too.
  */
-static uint32_t SimulateAndCountLoopsMethod2(uint32_t numNodes, const uint32_t *__restrict shuffledDeck, uint32_t * __restrict a)
+static uint32_t SimulateAndCountLoopsMethod2(uint32_t                   numNodes,
+                                             const uint32_t *__restrict shuffledDeck,
+                                             uint32_t       *__restrict a)
 {
     // Starting state
     for (uint32_t i = 0; i < numNodes; ++i) {
@@ -416,7 +434,7 @@ static uint32_t SimulateAndCountLoopsMethod2(uint32_t numNodes, const uint32_t *
 
     for (uint32_t i2 = 0; i2 < numNodes; i2 += 2) {
         /*
-            Connect v1 to v2:
+            Connect v1 to v2 (if not forming a loop):
 
             *---*     *---*     ->    *------*
             v0  v1    v2  v3          v0     v3
