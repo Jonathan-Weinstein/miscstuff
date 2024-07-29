@@ -30,9 +30,10 @@ A rougher approximation for the expected number of loops is ~= ln(N)/2 + 1.
 
 ## This program's design and view of the problem:
 
-    Method 1 (orignal/old and worse than method 2.
-              I only like for how CountConnectedComponentsDestructive doesn't need to keep a "visited" set
-              for the graph traversal):
+    Method 1
+        >>> orignal/old and worse than method 2 <<<
+              I mainly like it for how CountConnectedComponentsDestructive doesn't need to keep a "visited" set
+              for the graph traversal:
 
         Each of the N strings has 2 "nodes" connected to each end of the string,
         so there are 2N nodes in total. Each node is represented by a unique integer
@@ -298,8 +299,6 @@ struct ThreadParam {
 };
 typedef struct ThreadParam ThreadParam;
 
-#define StringConnection(x) ((x) ^ 1) // starting string connections, implicit
-
 static void Construct(ThreadParam *g, uint32_t numNodes)
 {
     VERIFY(!(numNodes & 1)); // must be even
@@ -351,7 +350,7 @@ static uint32_t CountConnectedComponentsDestructive(uint32_t *welds, uint32_t nu
                 welds[currentNodeId & -2] = (NodeId)-1; // mark even node of currentNodeId's string
                 nStringsThisComponent++;
                 /* Traverse 1 weld then 1 string in the same direction (e.g counter-clockwise): */
-                currentNodeId = StringConnection(weldConn);
+                currentNodeId = weldConn ^ 1;
             } while ((weldConn & -2) != outerIter); // (x & -2) clears lowest bit in x
             ASSERT((int32_t)welds[currentNodeId & -2] < 0);
             result++;
@@ -402,7 +401,7 @@ static uint32_t SimulateAndCountLoopsMethod1(uint32_t numNodes, const uint32_t* 
  * Array "a" is of length numNodes and is pre-allocated.
  *
  * In the implementation, a[i] represents the current free ball of the _composite_ string
- * the ball of a[i] is attached to. After connecting verts "x" and "y", a[x] and a[y] do not matter.
+ * the ball of a[i] is attached to. After connecting nodes "x" and "y", a[x] and a[y] do not matter.
  *
  * This method seems better than method1 for all numNodes tried, and is less code too.
  */
@@ -431,9 +430,9 @@ static uint32_t SimulateAndCountLoopsMethod2(uint32_t numNodes, const uint32_t *
         a[v0] = v3;
         a[v3] = v0;
 
-        ASSERT((v0 == v2) == (v3 == v1)); // either cond indicates we are closing a loop
+        ASSERT((v0 == v2) == (v3 == v1));
 
-        if (v0 == v2) {
+        if (v0 == v2) { // we are closing a loop
             nLoops++;
         }
     }
