@@ -292,6 +292,35 @@ void Shuffle(uint32_t *bag, int32_t n, pcg32_random_t *p_rng)
     }
     *p_rng = rng;
 }
+/*
+Potential idea to generate a _non-repeating_ pseudo-random sequence of numbers in [0:N) _without_ an extra array
+(the shuffled array):
+- Feed sequential numbers [0, roundup_pot(N)) to an invertible "avalanche" function, output is in < roundup_pot(N).
+- Reject output >= N.
+- For example "avalanche" function, Murmur3 finalizer style, see https://github.com/skeeto/hash-prospector
+-- Multiply seems good at defusing bits left/up, and xorshift okay for diffusing bits right/down.
+uint32_t Avalanche(const Seeds& seeds, uint32_t x, uint32_t M)
+{
+    ASSERT(M >= X); // M = roundup_pot(N) - 1
+    ASSERT(M != 0 && (~0u >> (32 - K)) == M);
+    ASSERT(K >= 1)
+
+    x ^= x >> seeds.shift_AC; // shifts must be in [1 : min(K, TypeWidth-1)], choose number close to K/2
+    x = (x * seeds.cool_k_bit_odd_numer_A) & M;
+    x ^= x >> seeds.shift_B
+    x = (x * seeds.cool_k_bit_odd_numer_B) & M;
+    x ^= x >> seeds.shift_AC;
+
+    return x;
+}
+CAVEATS:
+- Can "arbitrary seeds" produce good quality?
+-- Maybe can do additional mixing with good known constants for each K?
+- Not good interms of number of streams for small N,:
+Say for a deck of cards, N = 52, nest pot is 64 (log2=6). If seed is just from multiplies,
+then only (6 - 1)*(num_muliplies) = 1024 _potentially_ unique streams , (the - 1 is because bit 0 of multiplier must be set).
+A deck has 52! permutations, waaay more than 1024.
+*/
 // @end_util
 // ============================================================================
 
