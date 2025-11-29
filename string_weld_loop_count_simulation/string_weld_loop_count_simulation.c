@@ -205,25 +205,9 @@ typedef struct pcg_state_setseq_64 pcg32_random_t;
 // If you *must* statically initialize it, here's one.
 #define PCG32_INITIALIZER   { 0x853c49e6748fea9bULL, 0xda3e39cb94b95bdbULL }
 
-void pcg32_srandom_r(pcg32_random_t* rng, uint64_t initstate, uint64_t initseq);
-uint32_t pcg32_random_r(pcg32_random_t* rng);
-uint32_t pcg32_boundedrand_r(pcg32_random_t* rng, uint32_t bound);
-
-// pcg32_srandom_r(rng, initstate, initseq):
-//     Seed the rng.  Specified in two parts, state initializer and a
-//     sequence selection constant (a.k.a. stream id)
-void pcg32_srandom_r(pcg32_random_t* rng, uint64_t initstate, uint64_t initseq)
-{
-    rng->state = 0U;
-    rng->inc = (initseq << 1u) | 1u;
-    pcg32_random_r(rng);
-    rng->state += initstate;
-    pcg32_random_r(rng);
-}
-
 // pcg32_random_r(rng)
 //     Generate a uniformly distributed 32-bit random number
-uint32_t pcg32_random_r(pcg32_random_t* rng)
+static inline uint32_t pcg32_random_r(pcg32_random_t* rng)
 {
     uint64_t oldstate = rng->state;
     rng->state = oldstate * 6364136223846793005ULL + rng->inc;
@@ -232,49 +216,73 @@ uint32_t pcg32_random_r(pcg32_random_t* rng)
     return (xorshifted >> rot) | (xorshifted << ((-rot) & 31));
 }
 
-// pcg32_boundedrand_r(rng, bound):
-//     Generate a uniformly distributed number, r, where 0 <= r < bound
-uint32_t pcg32_boundedrand_r(pcg32_random_t* rng, uint32_t bound)
+// pcg32_srandom_r(rng, initstate, initseq):
+//     Seed the rng.  Specified in two parts, state initializer and a
+//     sequence selection constant (a.k.a. stream id)
+static inline void pcg32_srandom_r(pcg32_random_t* rng, uint64_t initstate, uint64_t initseq)
 {
-    // To avoid bias, we need to make the range of the RNG a multiple of
-    // bound, which we do by dropping output less than a threshold.
-    // A naive scheme to calculate the threshold would be to do
-    //
-    //     uint32_t threshold = 0x100000000ull % bound;
-    //
-    // but 64-bit div/mod is slower than 32-bit div/mod (especially on
-    // 32-bit platforms).  In essence, we do
-    //
-    //     uint32_t threshold = (0x100000000ull-bound) % bound;
-    //
-    // because this version will calculate the same modulus, but the LHS
-    // value is less than 2^32.
-
-    uint32_t threshold = -(int32_t)bound % bound;
-
-    // Uniformity guarantees that this loop will terminate.  In practice, it
-    // should usually terminate quickly; on average (assuming all bounds are
-    // equally likely), 82.25% of the time, we can expect it to require just
-    // one iteration.  In the worst case, someone passes a bound of 2^31 + 1
-    // (i.e., 2147483649), which invalidates almost 50% of the range.  In
-    // practice, bounds are typically small and only a tiny amount of the range
-    // is eliminated.
-    for (;;) {
-        uint32_t r = pcg32_random_r(rng);
-        if (r >= threshold)
-            return r % bound;
-    }
+    rng->state = 0U;
+    rng->inc = (initseq << 1u) | 1u;
+    pcg32_random_r(rng);
+    rng->state += initstate;
+    pcg32_random_r(rng);
 }
 // end PCG
 // ============================================================================
 
+/*
+---
+Below method by Daniel Lemire
+https://lemire.me/blog/2019/06/06/nearly-divisionless-random-integer-generation-on-various-systems/
+https://arxiv.org/abs/1805.10941 ("Fast Random Integer Generation in an Interval")
+https://github.com/lemire/FastShuffleExperiments/blob/57c32785aff9793ecc16ec6f39ecacfec0d9ed71/cpp/rangedrand.h#L150
+---
+PCG author has a tweak to it (https://www.pcg-random.org/posts/bounded-rands.html) not implemented here;
+it doesn't seem good when `range` is relatively small (like < 2**(N-1)).
+---
+Let x be a uniformly random K-bit number, N = 2**k.
+Let R be the desired range < N.
+
+Say R=3, K=3 (N = 8)
+threshold = 2
+
+x = 0: (rejected)
+x = 1: [-] // product = 3, look at point on axis to the RIGHT of the ']'
+x = 2: [-][-]
+x = 3: [-][-][-] (rejected)
+x = 4: [-][-][-][-]
+x = 5: [-][-][-][-][-]
+x = 6: [-][-][-][-][-][-]
+x = 7: [-][-][-][-][-][-][-]
+       0123456701234567012345670 (leftover)
+       RJ      RJ      RJ
+*/
+static inline uint32_t uniform_random_below(pcg32_random_t* rng, uint32_t range)
+{
+    uint32_t leftover;
+    uint64_t mul64;
+    mul64 = pcg32_random_r(rng) * (uint64_t)range; // full 32b x 32b -> 64b product
+    leftover = (uint32_t)mul64; // modulo 2**K
+    // (Anything % Z) is always < Z; attempt to cull calculation of threshold:
+    if (leftover < range) {
+        // Perform threshold = (2**K % range), which is the same as ((2**K - range) % range),
+        // which can be done via uint<K>_t arithmetic,
+        // since (-range) has the same ones-bit-pattern as (2**K - range):
+        uint32_t const threshold = (0 - range) % range;
+        while (leftover < threshold) {
+            mul64 = pcg32_random_r(rng) * (uint64_t)range; // full 32b x 32b -> 64b product
+            leftover = (uint32_t)mul64; // modulo 2**K
+        }
+    }
+    return mul64 >> 32;
+}
 
 // Fisher-Yates/Knuth shuffle:
 void Shuffle(uint32_t *bag, int32_t n, pcg32_random_t *p_rng)
 {
     pcg32_random_t rng = *p_rng;
     while (n >= 2) {
-        uint32_t j = pcg32_boundedrand_r(&rng, n); // result in [0, n)
+        uint32_t j = uniform_random_below(&rng, n); // result in [0, n)
         uint32_t i = --n;
         /* swap(a[i], a[j]): */
         uint32_t x = bag[i];
@@ -284,10 +292,8 @@ void Shuffle(uint32_t *bag, int32_t n, pcg32_random_t *p_rng)
     }
     *p_rng = rng;
 }
-
-
 // @end_util
-
+// ============================================================================
 
 #define MAX_STRINGS_LG2 27
 #define MAX_NODES_LG2 (MAX_STRINGS_LG2 + 1)
